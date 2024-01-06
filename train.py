@@ -3,21 +3,28 @@ from data_loader import load_cifar100_data
 from vgg19_model import VGG19
 
 class CustomCrossEntropyLoss(tf.keras.losses.Loss):
-    def __init__(self, label_smoothing=0.1, name='custom_cross_entropy_loss'):
-        super(CustomCrossEntropyLoss, self).__init__(name=name)
+    def __init__(self, from_logits=False, label_smoothing=0.1, reduction=tf.keras.losses.Reduction.AUTO, name='custom_cross_entropy_loss'):
+        super(CustomCrossEntropyLoss, self).__init__(reduction=reduction, name=name)
+        self.from_logits = from_logits
         self.label_smoothing = label_smoothing
 
     def call(self, y_true, y_pred):
-        num_classes = tf.shape(y_pred)[-1]
+        y_true = tf.cast(y_true, tf.float32)  # Ensure y_true is of float data type
 
-        # Apply label smoothing
-        y_true = y_true * (1.0 - self.label_smoothing) + self.label_smoothing / num_classes
+        if self.from_logits:
+            y_pred = tf.nn.log_softmax(y_pred, axis=-1)
 
-        # Calculate cross-entropy loss
-        loss = -tf.reduce_sum(y_true * tf.math.log(tf.clip_by_value(y_pred, 1e-10, 1.0)))
+        smooth_labels = y_true * (1.0 - self.label_smoothing) + self.label_smoothing / tf.cast(y_pred.shape[-1], tf.float32)
+        loss = -tf.reduce_sum(smooth_labels * y_pred, axis=-1)
+
+        if self.reduction == tf.keras.losses.Reduction.SUM_OVER_BATCH_SIZE:
+            loss = tf.reduce_mean(loss)
+        elif self.reduction == tf.keras.losses.Reduction.SUM:
+            loss = tf.reduce_sum(loss)
 
         return loss
 
+# Device configuration
 # Device configuration
 device = '/gpu:0' if tf.config.list_physical_devices('GPU') else '/cpu:0'
 
@@ -34,7 +41,7 @@ learning_rate = 0.005
 model = VGG19(num_classes)
 
 # Loss and optimizer
-criterion = CustomCrossEntropyLoss(label_smoothing=0.1)
+criterion = CustomCrossEntropyLoss(from_logits=True,label_smoothing=0.1)
 optimizer = tf.keras.optimizers.legacy.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
 
 # Train the model
